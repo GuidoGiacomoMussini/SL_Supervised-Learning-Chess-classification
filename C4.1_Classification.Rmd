@@ -1,0 +1,501 @@
+---
+title: "Unsupervised"
+author: "GuidoGIacomoMussini"
+date: '2022-06-19'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+##LIBRARIES
+
+```{r}
+gc()
+library(readr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+library(dplyr)  
+library(tidyverse)
+library(plotly)  
+library(rcompanion)
+library(GGally)
+library(tree)
+library(partykit)
+library(ISLR)
+library(caret)
+library(randomForest)
+library(broom)
+library(olsrr)
+library(car)
+library(class)
+library(glmnet)
+source("C:/Users/Guido/Desktop/StatisticalLearning/SingleProject/Supervised/Working_Directory/C2_Functions.R")
+setwd("C:/Users/Guido/Desktop/StatisticalLearning/SingleProject/Supervised/Working_Directory")
+
+```
+
+##DATASET
+```{r}
+df <- read_delim("FinalChessDataset.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+#scores <- read_delim("scores.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+#df <- na.omit(data.frame(df[c(1:nrow(scores)),], "whitescore" = scores$whiteScore, "blackscore" = scores$blackScore))
+anyNA(df) ##false
+tot = nrow(df)
+```
+
+##FACTORS
+```{r}
+##categorical variables --> factors
+df$winner <- as.factor(df$winner)
+df$rated <- as.factor(df$rated)
+df$victory_status <- as.factor(df$victory_status)
+df$ECO <- as.factor(df$ECO)
+df$firstmove <- as.factor(df$firstmove)
+df$firstresponse <- as.factor(df$firstresponse)
+df$w.castle <- as.factor(df$w.castle)
+df$b.castle <- as.factor(df$b.castle)
+```
+
+#------------------------------------------------------------------------------#
+#----------------------------PREPROCESSING-------------------------------------#
+#------------------------------------------------------------------------------#
+
+##Numeric and Factor variables
+```{r}
+##creating 2 dataframes with numerical and factor features 
+factor <- c()
+numeric <- c()
+
+classes <- sapply(df, class) 
+spl <- split.default(df, classes)
+factor <- data.frame(spl$factor)
+numeric <- data.frame(spl$numeric)
+```
+
+##Scaling
+```{r}
+##scaling numeric features
+numeric = scale(numeric)
+numeric = data.frame(numeric)
+
+##reassign factor and numeric to the dataset
+df = data.frame(factor, numeric)
+```
+
+##Correlation
+```{r}
+##numeric correlation
+x11()
+ggcorr(numeric, nbreaks = 5,
+    low = "steelblue",
+    mid = "white",
+    high = "darkred",
+    color = "grey50",
+    label = TRUE) 
+##i can observe that there are not variable with high correlation except for whitescore and blackscore
+
+##factor correlation
+factorcorr(factor)  ##my function --> defined in C2_Function script
+##ECO and firstmove highly correlated (95%)
+```
+
+##Outlier
+```{r}
+##aplot the boxplot to have a sight whether the numeric features have outliers
+x11()
+par(mfrow=c(2,1))
+boxplot(numeric[1:8], col="red", border="black")
+boxplot(numeric[9:15], col="red", border="black")
+
+
+```
+
+#------------------------------------------------------------------------------#
+#------------------------------MODELS------------------------------------------#
+#------------------------------------------------------------------------------#
+
+##Train and test set
+```{r}
+##dividing the dataset in train and test
+set.seed(19)
+split_train_test  = createDataPartition(df$winner, p = 0.7, list = FALSE)
+train = df[split_train_test, ] #12191 rows
+test = df[-split_train_test, ] #5223 rows
+
+##check if the proportions of the response variable have been preserved
+round(table(df$winner) / tot, 3)
+round(table(train$winner) / nrow(train), 3)
+round(table(test$winner) / nrow(test), 3)
+##the proportions have been preserved
+rm(split_train_test, spl)
+```
+
+##DecisioTree
+```{r}
+##
+##Confusion Matrix 
+#          Ref
+#
+#        E   NE
+#       _________
+# P  E | TP |  FP|
+# R    |_________|
+# E  NE| FN |  TN|
+#      |_________|
+
+n.tree = tree(train$winner~., train)
+n.tree_pred = predict(n.tree, test, type = "class")
+CM <- confusionMatrix(n.tree_pred, test$winner)
+Metric2(CM) 
+s.tree <- MetricCross2(CM)
+spec.s.tree<- confusionMatrix(n.tree_pred, test$winner)[[4]][2]
+sens.s.tree<- confusionMatrix(n.tree_pred, test$winner)[[4]][1]
+#Accuracy 0.8045463 
+#Sensitivity 0.7152914 
+#Specificity 0.8857651 
+
+```
+
+##ParameterTuning (running time: 1-2m)
+```{r}
+start.time <- Sys.time()
+#------------------------------------------------------------------------------- 
+
+##manual parameter tuning of min criterion:
+cross.ctree <- c()
+j = 1
+for(i in 1: 50) {
+u.ctree <- ctree(train$winner ~ .,  data=train, control = ctree_control(mincriterion=0.05*i, minsplit=0, minbucket=0))
+u.ctree_pred <- predict(u.ctree, test)
+CMCTREE <- confusionMatrix(u.ctree_pred, test$winner) 
+cross.ctree[i] <- MetricCross2(CMCTREE)
+}
+##find the best parameter
+while(j <20) {
+  if(cross.ctree[j] != max(cross.ctree)) {j = j+1 }
+  else {break}
+}
+opt = j
+j = 1
+opt*0.05 #0.65
+cross.ctree 
+max(cross.ctree)
+x11()
+plot(cross.ctree,  xlab = "Mincriterion*20", ylab = "Accuracy", type = "b", col = ifelse(cross.ctree > max(cross.ctree)
+ | cross.ctree <max(cross.ctree)
+, "black", "red"), pch = ifelse(cross.ctree > max(cross.ctree)
+ | cross.ctree <max(cross.ctree)
+, 1, 19), xlim = c(0, 20) )  
+
+##build the model with the best parameter
+u.ctree <- ctree(train$winner ~ .,  data=train, control = ctree_control(mincriterion=0.05*opt, minsplit=0, minbucket=0))
+u.ctree_pred <- predict(u.ctree, test)
+CMCTREE <- confusionMatrix(u.ctree_pred, test$winner) 
+Metric2(CMCTREE) 
+Ctree <- MetricCross2(CMCTREE)
+spec.Ctree<- confusionMatrix(u.ctree_pred, test$winner)[[4]][2]
+sens.Ctree<- confusionMatrix(u.ctree_pred, test$winner)[[4]][1]
+#Accuracy 0.8323086 
+#Sensitivity 0.8157998 
+#Specificity 0.847331 
+
+##to visualisation purpose, let's print the tree with depth = 3
+V.ctree <- ctree(train$winner ~ .,  data=train, control = ctree_control(mincriterion= 0.05*opt, minsplit=0, minbucket=0, maxdepth = 3))
+V.ctree_pred <- predict(u.ctree, test)
+x11()
+plot(as.simpleparty(V.ctree))
+
+#-------------------------------------------------------------------------------
+end.time <- Sys.time()
+time.taken <- round(end.time - start.time,2)
+time.taken 
+```
+
+#RandomForest with cross validation (Running Time: 30m-1h)
+```{r}
+start.time <- Sys.time()
+#------------------------------------------------------------------------------- 
+
+##set the parameters
+set.seed(19)
+
+RF_cv <- trainControl(method='cv', number=10, search = 'grid')
+
+MINmtry = round(sqrt(ncol(df)), 0)
+MAXmtry = ncol(df) - (round(sqrt(ncol(df)), 0) +1)
+RF_grid <- expand.grid(.mtry=(MINmtry:MAXmtry)) ##grid search for the best number of variable to randomly choose at each split
+
+##Random Forest Model
+rf <- train(winner~., data=train, method = 'rf', metric = 'Accuracy', tuneGrid=RF_grid, trControl = RF_cv)
+
+rf_best_set <- rf$results %>%  arrange(desc(rf$results$Accuracy)) ##standings of hyperparameters ordered by Accuracy
+rf_best_set[1, c(1:3)] ##optimal mtry = 6
+
+x11()
+plot(rf, xlab="number of features selected at each split", ylab="Accuracy")  ##accuracy plot for different mtry
+
+##Variables importance
+var_imp <- varImp(rf, scale=FALSE)$importance
+var_imp <- data.frame(variables=row.names(var_imp), importance=var_imp$Overall)
+x11()
+var_imp %>%  arrange(importance) %>%
+         ggplot(aes(x=reorder(variables, importance), y=importance)) + 
+        geom_bar(stat='identity') + 
+        coord_flip() + 
+        xlab('Variables') +
+        labs(title='Random forest variable importance') + 
+        theme(axis.text = element_text(size = 10), 
+              axis.title = element_text(size = 15), 
+              plot.title = element_text(size = 20), 
+              ) +theme_classic()  
+
+##Prediction
+rf.test <- predict(rf, test)
+RFCMTest<- confusionMatrix(rf.test, test$winner)
+MetricCross2(RFCMTest)
+RFtree <- MetricCross2(RFCMTest)
+spec.RFtree<- confusionMatrix(rf.test, test$winner)[[4]][2]
+sens.RFtree<- confusionMatrix(rf.test, test$winner)[[4]][1]
+#  Accuracy  0.8386436 
+# Sensitivity 0.8146265 
+# Specificity 0.8604982 
+
+
+#-------------------------------------------------------------------------------
+end.time <- Sys.time()
+time.taken <- round(end.time - start.time,2)
+time.taken 
+```
+
+##XGBoost (runtime: 10-30m)
+```{r}
+start.time <- Sys.time()
+#-------------------------------------------------------------------------------
+
+set.seed(19)
+##CV
+XG_cv <- trainControl(method = "cv", number = 5, search = 'grid')
+
+##gridsearch
+XG_grid<-expand.grid(
+  nrounds = seq(from = 500, to = 2000, by = 100),
+  eta = c(0.1, 0.2, 0.3, 0.4),
+  max_depth = c(1, 2, 3, 4, 5, 6),
+  gamma = 0,
+  colsample_bytree = 0.5,
+  subsample = 0.5, 
+  min_child_weight = 1
+)
+
+##ModelSelection
+xg <- train(winner~., data=train, method = 'xgbTree', metric = 'Accuracy', tuneGrid=XG_grid, trControl = XG_cv)
+x11()
+plot(xg)
+print(xg) 
+xg_best_set <- xg$results %>%  arrange(desc(xg$results$Accuracy)) ##standings of hyperparameters ordered by Accuracy
+xg_best_set[1, c(1:8)] ##best set of hyperparameters:
+# eta | max_depth | gamma | colsample_bytree| min_child_weight | subsample | nrounds | Accuracy
+# 0.1         3     0                0.5                1       0.5            1900     0.8897678
+
+##Important variables
+var_imp <- varImp(xg, scale=FALSE)$importance
+var_imp <- data.frame(variables=row.names(var_imp), importance=var_imp$Overall)
+x11()
+var_imp %>%  arrange(importance) %>%
+         ggplot(aes(x=reorder(variables, importance), y=importance)) + 
+        geom_bar(stat='identity') + 
+        coord_flip() + 
+        xlab('Variables') +
+        labs(title='XGBoost variables importance') + 
+        theme(axis.text = element_text(size = 10), 
+              axis.title = element_text(size = 15), 
+              plot.title = element_text(size = 20), 
+              ) +theme_classic()
+
+##Prediction
+xg.test <- predict(xg, test)
+XGCMTest<- confusionMatrix(xg.test, test$winner)
+Metric2(XGCMTest) 
+XGtree <- MetricCross2(XGCMTest)
+spec.XGtree<- confusionMatrix(xg.test, test$winner)[[4]][2]
+sens.XGtree<- confusionMatrix(xg.test, test$winner)[[4]][1]
+# Accuracy  0.8923048 
+# Sensitivity 0.882675 
+# Specificity 0.9010676 
+
+#-------------------------------------------------------------------------------
+end.time <- Sys.time()
+time.taken <- round(end.time - start.time,2)
+time.taken 
+```
+
+##Logistic Regression(3-5 minutes)
+```{r}
+start.time <- Sys.time()
+#-------------------------------------------------------------------------------
+
+##Lasso Regularisation----------------------------------------------------------
+
+`%ni%`<-Negate(`%in%`)
+
+x<-model.matrix(winner~.,data=df)
+pdf <- data.frame(x)
+x=x[,-1]
+y = df$winner
+
+set.seed(19)
+cvfit <- cv.glmnet(x, y, family = "binomial", type.measure = "class")
+c<-coef(cvfit, s='lambda.min',exact=TRUE)
+inds<-which(c!=0)
+variables<-row.names(c)[inds]
+variables<-variables[variables %ni% '(Intercept)']
+
+lrdf <- pdf %>% select(c(variables[-7]))
+lrdf$winner <- y
+lrdf$b.castle <- pdf$b.castleno.castle ##regularizated dataset
+
+
+##LG Model on the entire regularizated dataset----------------------------------
+set.seed(19)
+glm.model=glm(winner~., data=lrdf,family=binomial)
+glm.probs <- predict(glm.model,type="response") 
+glm.pred=ifelse(glm.probs>0.5,"White","Black")
+GLMPR <- list(1, table(glm.pred,lrdf$winner))
+lg <- LGMetric(GLMPR) 
+##Accuracy 0.8339201
+##Sensitivity 0.8157228
+##specificity 0.8504643
+
+
+##Check for linearity between logit and continous variables:
+logistic.numeric <- lrdf[, -c(1:5)]
+logistic.numeric <- logistic.numeric[, -c(12:13)]
+
+glm.norm <- logistic.numeric %>%
+  mutate(logit = log(glm.probs/(1-glm.probs))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+x11()
+ggplot(glm.norm, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")+theme_classic()
+##Everything seems to be quite linearly associated except for white rating and black rating
+
+##Check for Outliers 
+model.data <- augment(glm.model)
+cooks = model.data$.cooksd
+x11()
+plot(cooks, main = "Cook's distance", col = ifelse(cooks > 4/tot, "red", "black"))
+abline(a = 4/tot, b = 0, col = "blue", lwd = 3)##the values above the red line have to be removed
+
+n_out <- ifelse(cooks > 4/tot, 1, 0)
+sum(n_out) ##i have 1156 outliers
+LGdf <- data.frame(df, 'cooks' = model.data$.cooksd)
+LGdf <- LGdf %>% filter(between(cooks, min(cooks), 4/tot))
+tot - nrow(LGdf) ##outliers correctly removed
+
+##MultiCollinearity
+coll <- data.frame(vif(glm.model))
+collstand <- coll %>% arrange(desc(coll$vif.glm.model.))
+
+#-------------------------------------------------------------------------
+##New LG model:
+
+##train e test
+LGdf <- LGdf %>% select(-cooks)
+set.seed(19)
+split_train_test  = createDataPartition(LGdf$winner, p = 0.7, list = FALSE)
+LG_train = LGdf[split_train_test, ] #5433 rows
+LG_test = LGdf[-split_train_test, ] #2327 rows
+
+white.winrate = round(sum(with(df, winner == "white")) / nrow(df), 3)
+#model and prediction
+glm.model=glm(winner~., data=LG_train, family=binomial)
+glm.probs <- glm.model %>% predict(LG_test,type="response") 
+glm.pred=ifelse(glm.probs>white.winrate,"White","Black")
+GLMPR <- list(1, table(glm.pred,LG_test$winner))
+LGMetric(GLMPR)
+lg <- (GLMPR[[2]][1,1] +  GLMPR[[2]][2,2])/ (GLMPR[[2]][1,1] +  GLMPR[[2]][2,2]+ GLMPR[[2]][2,1] +  GLMPR[[2]][1,2])
+sens.lg <- GLMPR[[2]][1,1] / (GLMPR[[2]][1,1]+GLMPR[[2]][2,1])
+spec.lg <- GLMPR[[2]][2,2] / (GLMPR[[2]][2,2]+GLMPR[[2]][1,2])
+#Accuracy 0.8887338
+##Sensitivity 0.8938947
+##specificity 0.8840909
+
+##ODDS Ratio
+
+summary(glm.model)
+
+lgm.table <- data.frame("Odds Ratio" = exp(coef(glm.model)), 
+                        "P-value" = round(coef(summary(glm.model))[,'Pr(>|z|)'], 7), "sign" = 0 )
+
+lgm.table$sign <- ifelse(lgm.table$P.value<= 0.0001, "***",
+                    ifelse(lgm.table$P.value <= 0.01 & lgm.table$P.value>= 0.0001, "**", 
+                           ifelse(lgm.table$P.value <= 0.1 & lgm.table$P.value>= 0.001,  "*", 
+                                  ".")))
+                           
+#variable relevance-------------------------------------------------------------
+
+lgm.logodds<-data.frame("Log_Odds" = as.numeric(coef(glm.model)), "names" = rownames(lgm.table), 
+                        "P_value" = round(coef(summary(glm.model))[,'Pr(>|z|)'], 7), "pos" = 0)
+
+lgm.logodds <- lgm.logodds %>% filter(P_value < 0.05)
+
+lgm.logodds$pos <- ifelse(lgm.logodds$Log_Odds > 0, 1, 0)
+lgm.logodds$Log_Odds <- abs(lgm.logodds$Log_Odds)
+
+x11()
+ ggplot(lgm.logodds, aes(x=names, y=Log_Odds)) +
+ geom_bar(stat="identity", position=position_dodge(), aes(fill  = pos > 0 ) )+
+    theme(legend.position="none") +
+   theme(axis.text.x = element_text(angle = 25, vjust = 0.5, hjust=1))+
+  xlab("")+ ylab("")+
+  theme(panel.background = element_rect(fill = '#ffffff'), panel.grid.major= element_blank(), panel.grid.minor= element_blank(), plot.title = element_text(hjust = 0.9) )
+
+
+
+
+
+#-------------------------------------------------------------------------------
+end.time <- Sys.time()
+time.taken <- round(end.time - start.time,2)
+time.taken 
+```
+
+##Conclusions
+```{r}
+##let's make a comparison between the results that has been found. 
+a1 <- c(s.tree, Ctree, RFtree,XGtree, lg)
+a2 <- signif(a1, 3)
+sens1 <- c(sens.s.tree, sens.Ctree, sens.RFtree,sens.XGtree, sens.lg)
+sens2 <- signif(sens1, 3)
+spec1 <- c(spec.s.tree, spec.Ctree, spec.RFtree,spec.XGtree, spec.lg)
+spec2 <- signif(spec1, 3)
+
+alg1 <- data.frame("Algorithm" = c("Simple decision Tree", "Tuned Decision Tree", "Random Forest", "XGBoost", "Logistic Regression"), 
+                  "Metric" = a2)
+alg2 <- data.frame("Algorithm" = c("Simple decision Tree", "Tuned Decision Tree", "Random Forest", "XGBoost", "Logistic Regression"), 
+                  "Metric" = sens2)
+alg3 <- data.frame("Algorithm" = c("Simple decision Tree", "Tuned Decision Tree", "Random Forest", "XGBoost", "Logistic Regression"), 
+                  "Metric" = spec2)
+
+accplot <-ggplot(data=alg1, aes(x=Algorithm, y = Metric, fill = Algorithm)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=Metric), vjust=1.6, color="white", position = position_dodge(0.9), size=5)+theme_classic()+ ylab("Accuracy")
+
+sensplot <-ggplot(data=alg2, aes(x=Algorithm, y = Metric, fill = Algorithm)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=Metric), vjust=1.6, color="white", position = position_dodge(0.9), size=5)+theme_classic()+ ylab("Sensitivity")
+
+specplot <-ggplot(data=alg3, aes(x=Algorithm, y = Metric, fill = Algorithm)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=Metric), vjust=1.6, color="white", position = position_dodge(0.9), size=5)+theme_classic()+ ylab("Specificity")
+
+x11()
+grid.arrange(accplot, sensplot, specplot, ncol= 1)
+
+```
+

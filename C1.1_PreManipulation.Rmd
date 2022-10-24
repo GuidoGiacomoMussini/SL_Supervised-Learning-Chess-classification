@@ -1,0 +1,415 @@
+---
+title: "Untitled"
+author: "GuidoGIacomoMussini"
+date: '2022-06-17'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+##Libraries
+```{r}
+gc()
+library(readr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(bigchess)
+setwd("C:/Users/Guido/Desktop/StatisticalLearning/SingleProject/Supervised/Working_Directory") #set working directory
+```
+
+##Dataset
+```{r}
+chess <- read_delim("Chess.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE) ##import the dataset
+chess = distinct(chess, id, .keep_all = TRUE)##unique games
+```
+
+##Delete useless variabls
+```{r}
+head(chess)
+chess <- chess %>%  dplyr::select(., -c(id, white_id, black_id, created_at, last_move_at))
+```
+
+##Na Checking
+```{r}
+anyNA(chess) ##No NA
+```
+
+##Significant Matches
+```{r}
+chess <- chess %>% filter(chess$turns > 4) ##only significative games
+tot = nrow(chess) ##save the number of rows of the dataset
+```
+
+##VARIABLES MANIPULATION##
+
+##Rated
+```{r}
+levels(as.factor(chess$rated))
+chess$rated <- ifelse(chess$rated == TRUE, 1, 0) ##trasform rated from logical
+```
+
+#Winner-->Response variable
+```{r}
+winner = chess$winner
+chess = cbind(winner, chess[, -4]) ##set the response variable at the first place in the dataset
+```
+
+##victory_status\Winner problem
+```{r}
+##problem: victory status 'draw' obviously predict perfectly the response variable 'winner'
+##So since the draws are only 5% of my datasets, i'll delete them and i will trasform my problem in a 2-classes problems.
+##This will allow me to perform even others model, like for example the logistic regression.
+chess <- chess %>% filter(winner != 'draw')
+sum(with(chess, victory_status == 'draw')) ##i don't have draw anymore as predicted.
+
+chess$victory_status <- case_when(
+  chess$victory_status == 'mate'  ~ 'mate',
+  chess$victory_status == 'outoftime' 	~ 'outoftime',
+  TRUE ~ 'resign'
+)  ##fix the variable victory_status without draws
+
+##renaming the other variables in which 'draw' was an option and trasform them in factor
+chess$winner <- ifelse(chess$winner == 'white', 'white', 'black')
+chess$victory_status <- as.factor(chess$victory_status) 
+chess$winner <- as.factor(chess$winner) 
+```
+
+##Increment_Code
+```{r}
+##trasform the variable increment code in 2 variables: 'matchtime' and 'increment
+
+increment <- c()
+time <- c()
+
+for(j in 1:length(chess$increment_code)) {
+  
+  kalulu <-  strsplit(chess$increment_code[j], split = " ") ##split increment_code and save the result in a temporary variable
+   time[j] <- kalulu[[1]][1]                          
+   increment[j] <- kalulu[[1]][2]
+} ##save the splitted values in the 2 new variable
+
+time <- as.integer(time) 
+increment <- as.integer(increment) ##trasform in integer
+
+chess <- data.frame(chess, 'matchtime' = time, 'increment' = increment)
+chess <- chess %>%  select(-increment_code)   ##add the new variables to the dataset and removing the old one
+
+##check if the new variables are consistent
+table(as.factor(chess$matchtime)) ##i have 43 matches in which the duration of the game is 0, i'll delete these observations.
+chess <- chess %>% filter(between(matchtime, 1,  180))
+range(chess$matchtime) ##fixed
+
+rm(kalulu) ##removing the temporary variable form the environment
+```
+
+#Eco
+```{r}
+##clissify the openings in a more general way, using the first division in the ECO code:
+##Since the letters are encoded by r as number (A<B<C etc), i can use the operators < > = to create the classes.
+chess$ECO <- ifelse(chess$opening_eco >= 'A' & chess$opening_eco < 'B', 'A',
+                    ifelse(chess$opening_eco >= 'B' & chess$opening_eco < 'C', 'B',
+                           ifelse(chess$opening_eco >= 'C' & chess$opening_eco < 'D', 'C',
+                                  ifelse(chess$opening_eco >= 'D' & chess$opening_eco < 'E', 'D', 'E'))))
+
+chess = chess %>% select(-c(opening_eco, opening_name)) ##removing the useless variables
+```
+
+##NEW VARIABLES
+
+##FirstMoves
+```{r}
+##Define firstmove and firstresponse if they are usual or not according to lichess database https://lichess.org/study/Is8W6YaA
+firstmove <- c()
+firstresponse <- c()
+
+for(i in 1:length(chess$moves)) {
+  prova <-  strsplit(chess$moves[i], split = " ") ##split the i-games in first move and first response
+   firstmove[i] <- prova[[1]][1]
+   firstresponse[i] <- prova[[1]][2]
+}
+##check for Missing Values
+anyNA(firstmove)##NO NA
+anyNA(firstresponse)##NA --> Removing NA
+chess = cbind(chess, firstmove, firstresponse)
+chess = na.omit(chess)
+tot -nrow(chess) ##Delated 18 observations
+
+##Now i'll divide the first two moves in 'Usual' and 'Unusual'. I'll start from first response that is usual if
+##the response is usual with respect to a common opening move (e4, d4, Nf3)
+
+for(i in 1: length(chess$firstmove)) {
+  if(firstmove[i] == 'e4' & (chess$firstresponse[i] == 'c5' | chess$firstresponse[i] == 'e5' | chess$firstresponse[i] == 'e6'))
+  {chess$firstresponse[i] <- 'Usual'}
+  else if(firstmove[i] == 'd4' & (chess$firstresponse[i] == 'Nf6' | chess$firstresponse[i] == 'd5' | chess$firstresponse[i] == 'e6'))
+  {chess$firstresponse[i] <- 'Usual'}
+  else if(firstmove[i] == 'Nf3' & (chess$firstresponse[i] == 'd5' | chess$firstresponse[i] == 'c5' |  chess$firstresponse[i] == 'e6'))
+  {chess$firstresponse[i] <- 'Usual'}
+  else  {chess$firstresponse[i] <- 'Unusual'}
+}
+chess$firstmove <- ifelse(chess$firstmove == 'e4' | chess$firstmove == 'e4' | chess$firstmove == 'e4', 'Usual', 'Unusual') ##defining firstmove as usual an not usual
+rm(prova) ##removing temporary variable
+```
+
+##diffELO
+```{r}
+##define the variable diffELO as the weighted difference between white rating and black rating
+##first step: define the difference in ELO
+deltaELO <- chess$white_rating - chess$black_rating 
+range(deltaELO)
+
+##second step: create the weights:
+meanrating <- apply(chess[, c(5:6)], 1, mean) ##mean by rows between white rating nd black rating
+meanrating <- meanrating / mean(meanrating) ##dividing by the mean: if it is bigger than the mean --> division > 1, bonus. And viceversa
+meanrating <-(meanrating-min(meanrating))/(max(meanrating)-min(meanrating)) ##scale it in [0, 1]
+meanrating <- meanrating +1 ##5th step: scale it in [1, 2], in this way i have created a 'bonus' for higher rated games
+hist(meanrating)
+
+##third step: multiply deltaELO for the corrisponding weight.
+chess$diffELO <- deltaELO*meanrating
+```
+
+##PieceMoves
+```{r}
+##Some informations about the match: number of white and black piece moves, takes, checks, castle or not
+
+White.kingMoves <- c()
+Black.KingMoves <- c()
+
+White.queenMoves <- c()
+Black.queenMoves <- c()
+
+White.rookMoves <- c()
+Black.rookMoves <- c()
+
+White.knightMoves <- c()
+Black.knightMoves <- c()
+
+White.bishopMoves <- c()
+Black.bishopMoves <- c()
+
+White.takes <- c()
+Black.takes <- c()
+
+White.castle <- c()
+Black.castle <- c() 
+
+white.check <- c()
+black.check <- c()
+
+w.quality_gain <- c() ##number of promotion for white and black
+b.quality_gain <-c()  ##these two variables will be useful in the next chunk
+
+tomori = NULL
+whiteM = NULL
+blackM = NULL ##set the temporary variables
+for(k in 1 : length(chess$moves)) {
+  tomori <-  strsplit(chess$moves[k], split = " ") ##divide 'moves' into strings 
+  tomori <- unlist(tomori) ##unlist the list 'tomori'
+  whiteM <- (tomori[seq(1,length(tomori),2)])
+  blackM <- (tomori[seq(2,length(tomori),2)]) ##assigining the moves to black and white
+  
+  White.kingMoves[k] <- length(grep("K", whiteM))
+  Black.KingMoves[k] <- length(grep("K", blackM)) ##counting the number of king moves
+  
+  White.queenMoves[k] <- length(grep("Q", whiteM))
+  Black.queenMoves[k] <- length(grep("Q", blackM)) ##counting the number of queen moves
+  
+  White.rookMoves[k] <- length(grep("R", whiteM))
+  Black.rookMoves[k] <- length(grep("R", blackM)) ##counting the number of Rook moves
+  
+  White.knightMoves[k] <- length(grep("N", whiteM))
+  Black.knightMoves[k] <- length(grep("N", blackM)) ##counting the number of Knight moves
+  
+  White.bishopMoves[k] <- length(grep("B", whiteM))
+  Black.bishopMoves[k] <- length(grep("B", blackM)) ##counting the number of Bishop moves
+  
+  White.takes[k] <- length(grep("x", whiteM))
+  Black.takes[k] <- length(grep("x", blackM)) ##counting the number of takes
+  
+  White.castle[k] <- ifelse(length(grep("O", whiteM))> 0, 'castle', 'no castle')
+  Black.castle[k] <- ifelse(length(grep("O", blackM))> 0, 'castle', 'no castle') ##castle\ no castle
+  
+  white.check[k] <- length(grep("\\+", whiteM))
+  black.check[k] <- length(grep("\\+", blackM)) ##number of checks in the game
+  
+  w.quality_gain[k] <- length(grep("=", whiteM))
+  b.quality_gain[k] <- length(grep("=", blackM)) ##number of pawns promoted. 
+
+}
+##assigning the difference between w. and b. to the dataset. It is more important the difference between the two player than 
+##the numbers themselves. Moreover: dimensionality reduction
+w.king.moves <- as.numeric(White.kingMoves)
+b.king.moves <- as.numeric(Black.KingMoves)
+chess$king.moves <- w.king.moves - b.king.moves
+
+w.queen.moves <- as.numeric(White.queenMoves)
+b.queen.moves <- as.numeric(Black.queenMoves)
+chess$queen.moves <- w.queen.moves - b.queen.moves
+
+w.rook.moves <- as.numeric(White.rookMoves)
+b.rook.moves <- as.numeric(Black.rookMoves)
+chess$rook.moves <- w.rook.moves - b.rook.moves
+
+w.knight.moves <- as.numeric(White.knightMoves)
+b.knight.moves <- as.numeric(Black.knightMoves)
+chess$knight.moves <- w.knight.moves - b.knight.moves
+
+w.bishop.moves <- as.numeric(White.bishopMoves)
+b.bishop.moves <- as.numeric(Black.bishopMoves)
+chess$bishop.moves <- w.bishop.moves - b.bishop.moves
+
+w.takes <- as.numeric(White.takes)
+b.takes <- as.numeric(Black.takes)
+chess$takes <- w.takes - b.takes
+
+chess$w.castle <- as.factor(White.castle)
+chess$b.castle <- as.factor(Black.castle)
+
+w.check <- as.numeric(white.check)
+b.check <- as.numeric(black.check)
+chess$checks <- w.check - b.check
+
+rm(tomori) ##Removing the temporary variable
+```
+
+##FinalMaterial (running time: 25 min)
+```{r}
+##calculate the value of the material at the end of the game for each player.
+##the value is calculated as starting quality: 40 
+## + quality gain (defined above) x9, couse i'll assume that the pawn is always promoted in queen
+##- quality loss that is defined below
+
+##the value of each piece is standar and accepted by more or less every engine, even if some modern algorithm have found that a bishop 
+##has a slight higher value w.r.t a knight, in particularly in the end game the bishop pair is stronger than the knights pair.
+total_quality=   
+  1 + ##king
+  8 + ##pawns 
+  5*2 + ##rooks
+  3*2 + ##bishops
+  3*2 + ##knights
+  9 #queen
+
+#####Quality Loss
+turn <- c()
+w.piece <- c()
+b.piece <- c()
+w.quality_loss <- c()
+b.quality_loss <- c() ##set the variable for the quality loss
+square.heatmap <- c()
+turn.heatmap <- c()   ##these 2 variables will be useful for the visualisation part
+
+for(k in 1 : length(chess$moves))  ##external for: control each game
+{
+  game <-  strsplit(chess$moves[k], split = " ")  
+  game <- unlist(game) ##split and unlist each game in the moves
+  square <- ifelse(grepl("x", game), substr(game, 3, 4), 0) ##a 'x' indicate a takes, save in the temporary variable 'square'
+  ##the last two char of the moves, which represent the square, i.e Bxe5, square will contain "e5"
+
+  for(j in 1: length(square)) { ##2-for, nested in 1-for: control over the vector 'square'
+    
+    if(square[j] != 0) {
+      turn = append(turn, j) ##if there is a take, save the moves in which happens
+      turn.heatmap = append(turn.heatmap, j)
+      square.heatmap <- append(square.heatmap, square[j]) ##save even the total amount of square\turns for visualisation purposes
+      }
+  }
+  
+  for(l in 1: length(turn)) { ##3-for, nested in 1-for: control over the vector turn (which contain the moves in which a takes happened)
+    
+    for(v in turn[l] -1 : 1) {##4-for, nested in 3-for: work backwards from the takes to discover which piece was set in the square
+      if(grepl(square[turn[l]], game[v]) == TRUE & v %% 2 == 0) {w.piece <- append(w.piece, substr(game[v], 1, 1))}
+      else if(grepl(square[turn[l]], game[v]) == TRUE & v %% 2 != 0) {b.piece <- append(b.piece, substr(game[v], 1, 1))}
+      else {next}
+    } ##we also have to control if the takes happened in a odd or even moves, to define if the loss is for white or black. Than we save the 1 part of the string in b\w.piece, which represent the piece that have been taken, these variables contains 'Q', 'B' etc etc
+  }
+  
+  white_loss <- case_when(
+   w.piece == "Q" ~ 9,
+   w.piece == "R"  ~ 5,
+    w.piece == "B"  ~ 3,
+    w.piece == "K"  ~ 3,
+    TRUE ~ 1
+    )
+  w.quality_loss[k] = sum(white_loss) 
+  
+  black_loss <- case_when(
+    b.piece == "Q" ~ 9,
+    b.piece == "R"  ~ 5,
+    b.piece == "B"  ~ 3,
+    b.piece == "K"  ~ 3,
+    TRUE ~ 1
+    )
+  b.quality_loss[k] = sum(black_loss) ##define the values of the loss for white and black
+  
+  turn <- NULL
+  w.piece <- NULL
+  b.piece <- NULL ##set to 0 the temporary variable before the new 1-for iteration
+}
+
+##Defining the variable material:
+w.material = total_quality - w.quality_loss + w.quality_gain*9
+b.material = total_quality - b.quality_loss +b.quality_gain*9
+
+chess$material <- w.material -b.material
+```
+
+##King Last Square
+```{r}
+##find the squares in which the king has been chackmated.
+##NB: This chunk will be useful only for the visualisation part.
+
+kingdf <- chess %>% filter(chess$victory_status == 'mate') ##extract only the games with a checkmate
+
+bennacer <- c()
+black.moves <- c()
+white.moves <- c()
+white.checkmate.square <- c()
+black.checkmate.square <- c() ##defining the variables
+
+for(w in 1 : length(kingdf$moves))##1-for loop: control each game in 'kingdf'
+{
+  bennacer <-  strsplit(kingdf$moves[w], split = " ") ##divide 'moves' into strings 
+  bennacer <- unlist(bennacer) ##unlist
+  black.moves <- bennacer[seq(2,length(bennacer),2)]
+  white.moves <- bennacer[seq(1,length(bennacer),2)]  ##divide the white moves and the black moves
+
+  for(q in length(white.moves) : 1) { ##2-for nested in 1-for: go backwards to find where the white king has been checkmated
+    if(grepl("K", white.moves[q]) & length(bennacer) %% 2 == 0) { ##if the black checkmated and you find the king -->
+      white.checkmate.square[w] <- white.moves[q] ##-->save the square into the variable and then break
+      break
+    }
+    }
+
+    for(q in length(black.moves) : 1) { ##3-for: same as 2-for, for black
+    if(grepl("K", black.moves[q]) & length(bennacer) %% 2 != 0) {
+      black.checkmate.square[w] <- black.moves[q] 
+      break
+    }
+    }
+  }
+black.checkmate.square <- na.omit(black.checkmate.square)
+white.checkmate.square <- na.omit(white.checkmate.square) ##removing the NA generated in the process
+```
+
+#creating the datasets:
+```{r}
+##for visualisation:
+takes.df <- data.frame("takes.squares" = square.heatmap, "takes.turns" = turn.heatmap) 
+white.mate.df <- data.frame("white.mate" = white.checkmate.square) 
+black.mate.df <- data.frame("black.mate" = black.checkmate.square)
+
+##removing the useless variable from the dataset
+chess <- chess %>%  select(-moves)
+```
+
+##Export the new datasets to a .csv file
+```{r}
+write.table(chess, "FinalChessDataset.csv", sep = ";", row.names = FALSE, dec = ".", quote = TRUE)
+write.table(white.mate.df, "whitemate.csv", sep = ";", row.names = FALSE, dec = ".", quote = TRUE)
+write.table(black.mate.df, "blackmate.csv", sep = ";", row.names = FALSE, dec = ".", quote = TRUE)
+write.table(takes.df, "takes.csv", sep = ";", row.names = FALSE, dec = ".", quote = TRUE)
+```
+
+
+

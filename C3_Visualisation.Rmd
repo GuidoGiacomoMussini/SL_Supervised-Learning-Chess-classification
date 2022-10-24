@@ -1,0 +1,581 @@
+---
+title: "Untitled"
+author: "GuidoGIacomoMussini"
+date: '2022-07-03'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+##LIBRARIES
+
+```{r}
+gc()
+library(readr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+library(dplyr)                                    
+library(plotly)  
+library(rcompanion)
+library(GGally)
+library(superheat)
+library(DataExplorer)
+source("C:/Users/Guido/Desktop/StatisticalLearning/SingleProject/Supervised/Working_Directory/C2_Functions.R") ##recall the functions
+setwd("C:/Users/Guido/Desktop/StatisticalLearning/SingleProject/Supervised/Working_Directory") ##set the woriking directory
+
+```
+
+##DATASET
+```{r}
+df <- read_delim("FinalChessDataset.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+#scores <- read_delim("scores.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+#df <- na.omit(data.frame(df[c(1:nrow(scores)),], "whitescore" = scores$whiteScore, "blackscore" = scores$blackScore))
+anyNA(df) ##false
+df <- df %>% filter(df$turns > 4) ##do it again to delete possible errors occurred
+tot = nrow(df) ##save the num of observations
+
+##import the other datasets
+white.mate <- read_delim("whitemate.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+black.mate <- read_delim("blackmate.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+takes <- read_delim("takes.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+```
+
+##FACTORS
+```{r}
+##categorical variables --> into factors 
+df$winner <- as.factor(df$winner)
+df$rated <- as.factor(df$rated)
+df$victory_status <- as.factor(df$victory_status)
+df$ECO <- as.factor(df$ECO)
+df$firstmove <- as.factor(df$firstmove)
+df$firstresponse <- as.factor(df$firstresponse)
+df$w.castle <- as.factor(df$w.castle)
+df$b.castle <- as.factor(df$b.castle)
+```
+
+##DATA ESPLORATION
+
+##Response Variable
+```{r}
+##Define some variables to visualisation: 
+cwinner <- c(round(sum(with(df, winner == 'white')) / tot, 3),   ##49.8%
+             round(sum(with(df, winner == 'black')) / tot, 3))   ##45.4%
+nwinner <- c("white", "black")
+ggwinner <- data.frame(nwinner, cwinner) 
+
+##GGplot
+winner_plot <- ggplot(data=ggwinner, aes(x=nwinner, y = cwinner, fill = nwinner)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=cwinner), vjust=1.6, color="white", position = position_dodge(0.9), size=5)+
+  labs(x = "matches", y = "percentage")+ theme_classic()
+rm(ggwinner, cwinner, nwinner) ##removing variables
+##balanced dataset 
+```
+
+##rated
+```{r}
+##a rated match is a match that gives (or take) elo points based on your result. 
+##So a rated match it will be more competitive than a friendly one, since:
+#1   rated match
+#0   friendly match
+##Define variables:
+crated <- c(round(sum(with(df, rated == '1')) / tot, 3),  ##80.6%
+             round(sum(with(df, rated == '0')) / tot, 3)) ##19.6%
+nrated <- c("rated", "not rated")
+ggrated <- data.frame(crated, nrated)
+
+##GGPlot
+rated_plot <- ggplot(data=ggrated, aes(x=nrated, y = crated, fill = nrated)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=crated), vjust=1.6, color="white", position = position_dodge(0.9), size=5) +
+  labs(x = "matches", y = "percentage") + theme_classic()
+ 
+
+rm(ggrated, crated, nrated) ##remove variables
+
+##the mariority are rated games, so probably played strongly focused
+
+#-------------------------------------------------------------------------------
+#relation betwen rated and winner
+winrat <- c(round(sum(with(df, rated == '0' & winner == 'black')) / tot, 3),  
+             round(sum(with(df, rated == '0' & winner == 'white')) / tot, 3),
+            round(sum(with(df, rated == '1' & winner == 'black')) / tot, 3),
+            round(sum(with(df, rated == '1' & winner == 'white')) / tot, 3)
+            ) 
+a <- c("not rated", "not rated", "rated", "rated")
+b <- c("black", "white", "black", "white")
+c <- data.frame("w" = winrat, "a" =a, "b"= b)
+
+
+winrat_plot <- ggplot(c) + 
+  geom_bar(aes(b, w, fill = as.factor(a)), position = "dodge", stat = 'identity') +
+  geom_text(aes(b, w, label =  w, group = as.factor(a)), 
+            position = position_dodge(width = 0.9), size = 5, color = "white",  vjust=1.6)+ylab("percentage") + 
+  theme_classic()
+
+x11()
+grid.arrange(rated_plot, winner_plot, winrat_plot, ncol=3) ##grid with rated and winner
+
+range(df$checks)
+
+```
+
+##Turns
+```{r}
+##let's see how this variable is distributed
+turns_plot <- ggdensity(df, x = "turns", 
+          fill = "#0073C2FF", color = "#0073C2FF",
+          add = "mean", rug = TRUE)+ 
+  labs(title = "Turns density")
+
+##Let's see if there is some interesting pattern about the #(turns) and the response variable
+x11()
+turnsxwinner <- ggdensity(df, x = "turns",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 3)) + 
+  labs(title = "Turns by winner")
+
+##compare the number of turns with the ECO --> look if the types of opening affect the game's length
+x11()
+turnsxECO <- ggdensity(df, x = "turns",
+   add = "mean", rug = TRUE,
+   color = "ECO", fill = "ECO",
+   palette = get_palette("Set1", 5)) +
+  labs(title = "Turns by ECO")
+mean(df$black_rating)
+
+##compare number of turns with victory_status-----------------------------------
+x11()
+turnsxvictorystatus <- ggdensity(df, x = "turns",
+   add = "mean", rug = TRUE,
+   color = "victory_status", fill = "victory_status",
+   palette = get_palette("Set1", 5)) +
+  labs(title = "Turns by victory status")
+
+grid.arrange(turns_plot, turnsxwinner, turnsxECO, turnsxvictorystatus, ncol = 4) 
+
+```
+
+##Ratings
+```{r}
+##visualize how the ratings are distributed:
+
+##white-------------------------------------------------------------------------
+wrplot <- ggdensity(df, x = "white_rating", 
+          fill = "winner", color = "winner",
+          add = "mean", rug = TRUE)+ 
+  stat_overlay_normal_density(color = "red", linetype = "dashed")+
+  labs(title = "white rating by winner")+ theme_classic()
+
+##Black-------------------------------------------------------------------------
+brplot <- ggdensity(df, x = "black_rating", 
+          fill = "winner", color = "winner",
+          add = "mean", rug = TRUE)+ 
+  stat_overlay_normal_density(color = "red", linetype = "dashed") +
+  labs(title = "black rating by winner")+ theme_classic()
+
+##DiffELO-----------------------------------------------------------------------
+diffplot <- ggdensity(df, x = "diffELO", 
+          fill = "winner", color = "winner",
+          add = "mean", rug = TRUE)+ 
+  stat_overlay_normal_density(color = "red", linetype = "dashed") +
+  labs(title = "diffELO by winner") + theme_classic()
+
+#mean rating based on the timing------------------------------------------------
+
+factortime <- ifelse(df$matchtime <= 2 & df$matchtime >0 , 'bullet',
+                     ifelse(df$matchtime <= 5 & df$matchtime > 2, 'blitz',
+                            ifelse(df$matchtime <= 15 & df$matchtime > 5, 'rapid', 'classical')))
+time_rating <- data.frame("time" = factortime)
+time_rating$white <- df$white_rating
+time_rating$black <- df$black_rating
+time_rating %>%
+  group_by(time) %>%
+  summarise(White = mean(white), Black = mean(black), n = n())
+##we can see that the mean difference between white and black ELO is not significant
+##and we see that the mean difference is unexpectedly small from bullet to classical.
+
+##visualizing:
+x11()
+wrxtimeplot <- ggdensity(time_rating, x = "white",
+   add = "mean", rug = TRUE,
+   color = "time", fill = "time",
+   palette = get_palette("Set1", 4))+
+  labs(title = "White Rating by Time") 
+   + theme_classic()
+
+x11()
+grid.arrange(wrplot, brplot, diffplot, wrxtimeplot, ncol = 2)
+```
+
+## ECO and opening_ply
+```{r}
+##ECO distribution
+
+round(table(df$ECO) / tot, 3)*100
+
+##Opening moves by ECO----------------------------------------------------------
+opxECOplot <- ggdensity(df, x = "opening_ply",
+   add = "median", rug = TRUE,
+   color = "ECO", fill = "ECO",
+   palette = get_palette("Set1", 5))+
+  labs(x = 'Opening moves', y = 'density',  title = "opening moves by ECO") + theme_classic()
+
+##Opening moves by response variable--------------------------------------------
+
+opxwinplot <- ggdensity(df, x = "opening_ply",
+   add = "mean",
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 5))+
+  labs(x = 'Opening moves', y = 'density',  title = "opening moves by winner") + theme_classic()
+
+x11()
+grid.arrange(opxwinplot, opxECOplot, ncol = 2)
+```
+
+##MatchTime and Increment
+```{r} 
+##dividing matchtime in classical, rapid, blitz and bullet
+factortime <- ifelse(df$matchtime <= 2 & df$matchtime >0 , 'bullet',
+                     ifelse(df$matchtime <= 5 & df$matchtime > 2, 'blitz',
+                            ifelse(df$matchtime <= 15 & df$matchtime > 5, 'rapid', 'classical')))
+
+##occurences of matchtime
+time_rating <- data.frame("time" = factortime)
+pietime <- time_rating %>%
+  group_by(time) %>%
+  summarise(n = n()) 
+
+##PiePlot
+timepieplot <- ggplot(pietime, aes( x= " ", y = n,  fill=time))+
+geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start=0) +
+  scale_fill_brewer(palette="Set3") + labs(title ="time in minutes", x = "", y = "")  + theme_classic()
+
+##the majority of the games are 10-minute games. 
+##It is the perfect time that allows a amatuer to play a 'reasoned' game.
+
+#Increment----------------------------------------------------------------------
+
+##Dividing in intervals:
+table(as.factor(df$increment))
+factorincrement <- ifelse(df$increment == 0 , 'No_Increment',
+                     ifelse(df$increment <= 5 & df$increment > 0, '(0:5]',
+                            ifelse(df$increment <= 10 & df$increment > 5, '(5:10]', '(10:180]')))
+
+##increment occurences:
+increment_rating <- data.frame("increment" = factorincrement)
+pieincrement <- increment_rating %>%
+  group_by(increment) %>%
+  summarise(n = n()) 
+
+##Increment PiePlot
+incrementpieplot <- ggplot(pieincrement, aes( x= " ", y = n,  fill=increment))+
+geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start=0) +
+  scale_fill_brewer(palette="Set3") + labs( title = "increment in seconds", x = "", y = "")  + theme_classic()
+
+#Matchtime V Swinning-------------------------------------------------------------
+
+timewinplot <-ggplot(df, aes(x = matchtime, fill = winner)) + 
+  geom_histogram(aes(y = ..density..), position = "dodge") +
+  labs(x = 'matchtime', y = 'density',  title = "matchtime by winner")+ xlim(-1, 22)+ coord_flip() + theme_classic()
+ 
+incwinplot <-ggplot(df, aes(x = increment, fill = winner)) + 
+  geom_histogram(aes(y = ..density..), position = "dodge") +
+  labs(x = 'increment', y = 'density',  title = "increment by winner")+ xlim(-1, 22)+ coord_flip() + theme_classic()
+##in -1:21 for better visualisation
+x11()
+grid.arrange(timepieplot, incrementpieplot, timewinplot, incwinplot, ncol = 2)
+
+##time (matchtime +increment) game occurences-----------------------------------
+
+freqtime <- data.frame("time" = df$matchtime, 
+                       "increment" = df$increment,
+                       'merge' = paste(df$matchtime, df$increment))
+top <- freqtime %>%
+  group_by(merge) %>%
+  summarise('merge' = unique(merge), n = n()) %>% arrange(desc(n)) 
+```
+
+##Usual\Balanced Games
+```{r}
+##define the number of usual and unusual games
+Pescatore <- ifelse(df$firstmove == 'Usual' & df$firstresponse == 'Usual', 1, 0)
+
+##defining balanced(1) and unbalanced(0) games
+Creuza <- ifelse(abs(df$diffELO) < 50, 1, 0)
+
+##Usual games with respect to the response variable
+collina <- ifelse(Pescatore == 0 & df$winner == "white", 1, 0)
+matto <- ifelse(Pescatore == 0 & df$winner == "black", 1, 0)
+giudice <- ifelse(Pescatore == 1 &  df$winner == "white", 1, 0)
+blasfemo <- ifelse(Pescatore == 1 &  df$winner == "black", 1, 0)
+
+##dataframes for ggplot:
+pittima <- data.frame('values' = c(round(mean(Pescatore), 3), round(1-mean(Pescatore), 3)), 'usual' = c('usual', 'unusual'))
+jamin <- data.frame('values' = c(round(mean(Creuza), 3), round(1-mean(Creuza), 3)), 'balance' = c('balanced', 'unbalanced'))
+medico <- data.frame('values' = c(round(mean(collina), 3), round(mean(matto), 3), round(mean(giudice), 3), round(mean(blasfemo), 3)),                       'Usual' = c('not usual', 'not usual', 'usual', 'usual'), 
+                     'winner' = c("white", "black", "white", "black"))
+
+##balanced plot
+balplot<-ggplot(data=jamin, aes(x=balance, y = values, fill = balance)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=values), vjust=1.6, color="white", position = position_dodge(0.9), size=5)+
+   labs(title = "Balanced vs Unbalanced Game") + 
+  ylab("percentage") +
+  theme_classic()
+
+##usual plot
+usplot<-ggplot(data=pittima, aes(x=usual, y = values, fill = usual)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=values), vjust=1.6, color="white", position = position_dodge(0.9), size=5) +
+  labs(title = "Usual vs Unusual Game")+ 
+  ylab("percentage") +
+  theme_classic()
+
+##Usual vs winner
+
+uswinplot <-ggplot(data=medico, aes(x=Usual, y=values, fill=winner)) +
+geom_bar(stat="identity", position=position_dodge())+
+  geom_text(aes(label=values), vjust=1.6, color="white", position = position_dodge(0.9), size=5) +
+  labs(title = "Usual-Unusual Game vs response variable")+ 
+  ylab("percentage") +
+  theme_classic()
+ 
+x11()
+grid.arrange(uswinplot,  balplot,  usplot, ncol = 3)
+#-------------------------------------------------------------------------------
+#Usual-Balanced matrix: habits of player based on their opponent
+
+ris1 <- ifelse(Creuza == 1 & df$firstmove == 'Usual', 1, 0)
+ris2 <- ifelse(Creuza == 1 & df$firstmove == 'Unusual', 1, 0)
+ris3 <- ifelse(Creuza == 0 & df$firstmove == 'Usual', 1, 0)
+ris4 <- ifelse(Creuza == 0 & df$firstmove == 'Unusual', 1, 0)
+k1 = round(mean(ris1), 2) ##40% of the time if the match is unbalanced, the white plays an usual opening
+k2 = round(mean(ris2), 2) ##23% of the time if the match is unbalanced, the white plays an unusual opening
+k3 = round(mean(ris3), 2) ##24% of the time, if the match is balanced, the white plays an usual opening
+k4 = round(mean(ris4), 2) ##14% if the time, if the match is balanced, the white plays an Unusual opening
+A <- matrix(c(k1, k2, k3, k4), byrow = TRUE, nrow = 2, ncol = 2)
+rownames(A) <- c('UnBalanced', 'Balanced')
+colnames(A) <- c('Usual', 'Unusual')
+A
+##the matrix shows that in any case players prefer to use usual openings
+```
+
+#PieceMoves
+```{r}
+##Relation between the x.piece and the response variable
+kingplot <- ggdensity(df, x = "king.moves",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'king moves', y = 'density',  title = "king moves by winner")
+
+queenplot <- ggdensity(df, x = "queen.moves",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'queen moves', y = 'density',  title = "queen moves by winner")
+
+rookplot <- ggdensity(df, x = "rook.moves",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'rook moves', y = 'density',  title = "rook moves by winner")
+
+knightplot <- ggdensity(df, x = "knight.moves",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'knight moves', y = 'density',  title = "knight moves by winner")
+
+bishopplot <- ggdensity(df, x = "bishop.moves",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'bishop moves', y = 'density',  title = "bishop moves by winner")
+
+takesplot <- ggdensity(df, x = "takes",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'takes', y = 'density',  title = "takes by winner")
+
+checksplot <- ggdensity(df, x = "checks",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'checks', y = 'density',  title = "checks by winner")
+
+materialplot <- ggdensity(df, x = "material",
+   add = "mean", rug = TRUE,
+   color = "winner", fill = "winner",
+   palette = get_palette("Set1", 2))+
+  labs(x = 'material', y = 'density',  title = "material by winner")
+
+
+x11()
+grid.arrange(kingplot, queenplot, rookplot, bishopplot, knightplot, takesplot, checksplot, materialplot,  ncol = 4)
+
+
+#-------------------------------------------------------------------------------
+##castling analysis w.r.t winning chances:
+
+wcc <- ifelse(df$winner == "white" & df$b.castle == 'castle' & df$w.castle == 'castle' , 1, 0)
+bcc <- ifelse(df$winner == "black" & df$w.castle == 'castle'  & df$b.castle == 'castle', 1, 0)
+wnn <- ifelse(df$winner == "white" & df$b.castle == 'no castle' & df$w.castle == 'no castle', 1, 0)
+bnn <- ifelse(df$winner == "black" & df$w.castle == 'no castle' & df$b.castle == 'no castle', 1, 0)
+
+wcc = round( sum(wcc) / sum(with(df, b.castle == 'castle' & w.castle == 'castle' )), 2) ##50% of white winners | both castled
+bcc = round( sum(bcc) / sum(with(df, b.castle == 'castle' & w.castle == 'castle' )), 2) ##50% of black winners | both castled
+wnn = round( sum(wnn) / sum(with(df, b.castle == 'no castle' & w.castle == 'no castle')), 2) ##54% of white winners | both didn't castled
+bnn = round( sum(bnn) / sum(with(df, b.castle == 'no castle' & w.castle == 'no castle')), 2) ##46% of black winners | both didn't castled
+
+wcn <- ifelse(df$winner == "white" & df$b.castle == 'no castle' & df$w.castle == 'castle' , 1, 0)
+bcn <- ifelse(df$winner == "black" & df$w.castle == 'no castle'  & df$b.castle == 'castle', 1, 0)
+wnc <- ifelse(df$winner == "white" & df$b.castle == 'castle' & df$w.castle == 'no castle', 1, 0)
+bnc <- ifelse(df$winner == "black" & df$w.castle == 'castle' & df$b.castle == 'no castle', 1, 0)
+
+wcn = round( sum(wcn) / sum(with(df, w.castle == 'castle' & b.castle == 'no castle')), 2) ##54% of white winners | white castled, black doesn't
+bcn = round( sum(bcn) / sum(with(df, b.castle == 'castle' & w.castle == 'no castle')), 2) ##51% of black winners | black castled, white doesn't
+wnc = round( sum(wnc) / sum(with(df, b.castle == 'castle' & w.castle == 'no castle')), 2) ##46% of black winners | white castled, black doesn't
+bnc = round( sum(bnc) / sum(with(df, w.castle == 'castle' & b.castle == 'no castle')), 2) ##49% of white winners | black castled, white doesn't
+
+##create the castle-winner matrix:
+Castle.Matrix <- matrix(c(wcc, bcc, wnn, bnn, wcn, bnc, wnc, bcn), byrow = TRUE, nrow = 4, ncol = 2)
+rownames(Castle.Matrix) <- c('WC BC', 'WN BN', 'WC BN', 'WN BC')
+colnames(Castle.Matrix) <- c('White', 'Black')
+Castle.Matrix
+
+```
+
+##ChekmateHeatmap
+```{r}
+##Heatmap of the more frequent checkmate's squares: 
+
+##preparation:
+
+##define vectors which contains the squares in which the King has been checkmated
+white.squarelist <- c() 
+for(i in 1:length(white.mate$white.mate)) {
+white.squarelist[i] <- substr(white.mate$white.mate[i], 2,3)
+}
+
+black.squarelist <- c()
+for(i in 1:length(black.mate$black.mate)) {
+black.squarelist[i] <- substr(black.mate$black.mate[i], 2,3)
+}
+
+##define a control matrix numerated as a chessboard
+let <- c( "a", "b", "c", "d", "e", "f", "g", "h" )
+num <- c("1","2","3","4","5","6","7","8")
+square.mat <- matrix(0: 0, nrow = 8, ncol = 8)
+colnames(square.mat) <- let 
+rownames(square.mat) <- num
+for(l in 1: length(let)) {
+      for(n in 1:length(num)) {
+        square.mat[n,l] = paste(let[l],num[n], sep = "")
+        }
+      }
+#-------------------------------------------------------------------------------
+##white heatmap
+i=0
+g=0
+j=0
+white.heat.mat <- matrix(0: 0, nrow = 8, ncol = 8) ##define an empty 8x8 matrix
+##for loops to check if the square correspond to a checkmate square (using the control matrix), if so, add 1 to the white matrix in those coordinates.
+for(i in 1: length(white.squarelist)){
+  for(g in 1: 8) {
+    for(j in 1:8) {
+      if(square.mat[j,g] == white.squarelist[i]) {white.heat.mat[j,g] <- white.heat.mat[j,g]+1}
+    }
+  }
+}
+##naming columns and rows.
+colnames(white.heat.mat) <- let 
+rownames(white.heat.mat) <- num
+
+x11()
+king.1 <- superheat(white.heat.mat, left.label.size = 0.1, bottom.label.size = 0.1, left.label.col = c("#b58863", "#f0d9b5"),
+          bottom.label.col = c("#b58863", "#f0d9b5"), heat.col.scheme = "red",  grid.hline = FALSE, grid.vline = FALSE,X.text = square.mat, legend = FALSE,title = "White King's Square checkmate", title.alignment = "left")
+
+#-------------------------------------------------------------------------------
+##black heatmap.
+##same procedure used above
+i=0
+g=0
+j=0
+black.heat.mat <- matrix(0: 0, nrow = 8, ncol = 8)
+
+for(i in 1: length(black.squarelist)){
+  for(g in 1: 8) {
+    for(j in 1:8) {
+      if(square.mat[j,g] == black.squarelist[i]) {black.heat.mat[j,g] <- black.heat.mat[j,g]+1}
+    }
+  }
+}
+
+colnames(black.heat.mat) <- let 
+rownames(black.heat.mat) <- num
+
+x11()
+king.1 <- superheat(black.heat.mat, left.label.size = 0.1, bottom.label.size = 0.1, left.label.col = c("#b58863", "#f0d9b5"),
+          bottom.label.col = c("#b58863", "#f0d9b5"), heat.col.scheme = "red",  grid.hline = FALSE, grid.vline = FALSE,X.text = square.mat, legend = FALSE,title = "Black King's Square checkmate", title.alignment = "left")
+```
+
+#takesHeatmap (Running time > 1h)
+```{r}
+##defining the heatmaps for the most common squares in which there are takes, for white and black.
+
+##create 2 vectors with white and black takes:
+black.takes <- takes %>% filter(takes.turns %% 2 == 0) %>% select(-takes.turns) 
+white.takes <- takes %>% filter(takes.turns %% 2 != 0) %>% select(-takes.turns)
+
+#-------------------------------------------------------------------------------
+#black.takes
+##same procedure used for the king heatmap.
+i=0
+g=0
+j=0
+black.heat.mat <- matrix(0: 0, nrow = 8, ncol = 8)
+
+for(i in 1: nrow(black.takes)){
+  for(g in 1: 8) {
+    for(j in 1:8) {
+      if(square.mat[j,g] == black.takes[i,1]) {black.heat.mat[j,g] <- black.heat.mat[j,g]+1}
+    }
+  }
+}
+
+colnames(black.heat.mat) <- let 
+rownames(black.heat.mat) <- num
+
+x11()
+black.1 <- superheat(black.heat.mat, left.label.size = 0.1, bottom.label.size = 0.1, left.label.col = c("#b58863", "#f0d9b5"),
+          bottom.label.col = c("#b58863", "#f0d9b5"), heat.col.scheme = "red",  grid.hline = FALSE, grid.vline = FALSE,X.text = square.mat, legend = FALSE,title = "Black Takes", title.alignment = "left" )
+
+#-------------------------------------------------------------------------------
+#white.takes
+i=0
+g=0
+j=0
+white.heat.mat <- matrix(0: 0, nrow = 8, ncol = 8)
+for(i in 1: nrow(white.takes)){
+  for(g in 1: 8) {
+    for(j in 1:8) {
+      if(square.mat[j,g] == white.takes[i,1]) {white.heat.mat[j,g] <- white.heat.mat[j,g]+1}
+    }
+  }
+}
+colnames(white.heat.mat) <- let 
+rownames(white.heat.mat) <- num
+
+x11()
+white.1 <- superheat(white.heat.mat, left.label.size = 0.1, bottom.label.size = 0.1, left.label.col = c("#b58863", "#f0d9b5"),
+          bottom.label.col = c("#b58863", "#f0d9b5"), heat.col.scheme = "red",  grid.hline = FALSE, grid.vline = FALSE,X.text = square.mat, legend = FALSE,title = "White Takes", title.alignment = "left")
+```
+
